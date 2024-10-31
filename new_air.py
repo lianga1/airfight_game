@@ -2,6 +2,7 @@ import tkinter as tk
 import socket
 import threading
 from enum import Enum
+import random
 
 # 定义飞机方向
 class Direction(Enum):
@@ -134,6 +135,10 @@ class LANGame:
             print("对手已确认飞机！")
             if app.planes_confirmed:
                 print("双方已确认，游戏开始！")
+        elif message.startswith("OBSTACLES:"):
+            _, coords = message.split(":")
+            obstacles = [tuple(map(int, coord.split(","))) for coord in coords.split(";")]
+            app.set_opponent_obstacles(obstacles)
 
     def handle_attack(self, x, y):
         """
@@ -160,7 +165,7 @@ class LANGame:
 
 # 定义GUI应用程序
 class PlaneGameGUI:
-    def __init__(self, root, lan_game):
+    def __init__(self, root, lan_game,n_obstacles=16):
         self.root = root
         self.lan_game = lan_game
         self.root.title("飞机大战")
@@ -181,10 +186,11 @@ class PlaneGameGUI:
         self.create_buttons()
         self.draw_grid(self.canvas_own)
         self.draw_grid(self.canvas_opponent)
-    
+        self.obstacles = self.generate_obstacles(n_obstacles)
+        self.draw_obstacles(self.canvas_own,self.obstacles)
         self.canvas_own.bind("<Button-1>", self.place_plane)
         self.canvas_opponent.bind("<Button-1>", self.attack_position)
-
+        
     def create_buttons(self):
         button_frame = tk.Frame(self.root)
         button_frame.pack()
@@ -209,7 +215,24 @@ class PlaneGameGUI:
                 x2 = x1 + self.cell_size
                 y2 = y1 + self.cell_size
                 canvas.create_rectangle(x1, y1, x2, y2, outline="black")
+    def draw_obstacles(self, canvas, obstacles):
+        for x, y in obstacles:
+            x1 = x * self.cell_size
+            y1 = y * self.cell_size
+            x2 = x1 + self.cell_size
+            y2 = y1 + self.cell_size
+            canvas.create_rectangle(x1, y1, x2, y2, fill="black")
 
+    def generate_obstacles(self,n_obstacles):
+        obstacles = set()
+        while len(obstacles) < n_obstacles:
+            x = random.randint(0, self.grid_size - 1)
+            y = random.randint(0, self.grid_size - 1)
+            obstacles.add((x, y))
+        return list(obstacles)
+
+    def set_opponent_obstacles(self, obstacles):
+        self.draw_obstacles(self.canvas_opponent, obstacles)
     def place_plane(self, event):
         if self.planes_confirmed:
             print("飞机已确认，无法再放置或更改位置。")
@@ -238,6 +261,7 @@ class PlaneGameGUI:
             self.planes.pop()
             self.canvas_own.delete("all")
             self.draw_grid(self.canvas_own)
+            self.draw_obstacles(self.canvas_own, self.obstacles)
             for plane in self.planes:
                 self.draw_plane(self.canvas_own, plane)
 
@@ -250,8 +274,10 @@ class PlaneGameGUI:
             new_direction = Direction((last_plane.direction.value + 1) % 4)
             last_plane.direction = new_direction
             last_plane.body_points = last_plane.calculate_body_points()
+
             self.canvas_own.delete("all")
             self.draw_grid(self.canvas_own)
+            self.draw_obstacles(self.canvas_own, self.obstacles)
             for plane in self.planes:
                 self.draw_plane(self.canvas_own, plane)
 
@@ -264,8 +290,10 @@ class PlaneGameGUI:
             new_direction = Direction((last_plane.direction.value - 1) % 4)
             last_plane.direction = new_direction
             last_plane.body_points = last_plane.calculate_body_points()
+
             self.canvas_own.delete("all")
             self.draw_grid(self.canvas_own)
+            self.draw_obstacles(self.canvas_own, self.obstacles)
             for plane in self.planes:
                 self.draw_plane(self.canvas_own, plane)
 
@@ -277,8 +305,8 @@ class PlaneGameGUI:
         all_points = set()
         for plane in self.planes:
             for point in plane.body_points:
-                if (point.x, point.y) in all_points:
-                    print("飞机之间不能重叠！")
+                if (point.x, point.y) in all_points or (point.x, point.y) in self.obstacles:
+                    print("飞机之间不能重叠或与障碍物重叠！")
                     return
                 if not (0 <= point.x < self.grid_size and 0 <= point.y < self.grid_size):
                     print("飞机超出边界，无法确认！")
@@ -288,6 +316,8 @@ class PlaneGameGUI:
         print("飞机确认成功！")
         self.planes_confirmed = True
         self.lan_game.send_message("CONFIRM_PLANES")
+        obstacles_message = "OBSTACLES:" + ";".join([f"{p[0]},{p[1]}" for p in self.obstacles])
+        self.lan_game.send_message(obstacles_message)
         if self.lan_game.opponent_confirmed:
             print("双方已确认，游戏开始！")
 
